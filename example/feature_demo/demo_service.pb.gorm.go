@@ -11,7 +11,9 @@ import field_mask1 "google.golang.org/genproto/protobuf/field_mask"
 import gateway1 "github.com/infobloxopen/atlas-app-toolkit/gateway"
 import gorm1 "github.com/jinzhu/gorm"
 import gorm2 "github.com/infobloxopen/atlas-app-toolkit/gorm"
+import json1 "encoding/json"
 import query1 "github.com/infobloxopen/atlas-app-toolkit/query"
+import trace1 "go.opencensus.io/trace"
 
 import math "math"
 import google_protobuf2 "github.com/golang/protobuf/ptypes/empty"
@@ -998,7 +1000,35 @@ type IntPointServiceIntPointWithAfterList interface {
 
 // ListSomething ...
 func (m *IntPointServiceDefaultServer) ListSomething(ctx context.Context, in *google_protobuf2.Empty) (*ListSomethingResponse, error) {
-	return &ListSomethingResponse{}, nil
+	db := m.DB
+	if custom, ok := interface{}(in).(IntPointServiceSomethingWithBeforeListSomething); ok {
+		var err error
+		if db, err = custom.BeforeListSomething(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	res, err := DefaultListSomething(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	out := &ListSomethingResponse{Results: res}
+	if custom, ok := interface{}(in).(IntPointServiceSomethingWithAfterListSomething); ok {
+		var err error
+		if err = custom.AfterListSomething(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// IntPointServiceSomethingWithBeforeListSomething called before DefaultListSomethingSomething in the default ListSomething handler
+type IntPointServiceSomethingWithBeforeListSomething interface {
+	BeforeListSomething(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// IntPointServiceSomethingWithAfterListSomething called before DefaultListSomethingSomething in the default ListSomething handler
+type IntPointServiceSomethingWithAfterListSomething interface {
+	AfterListSomething(context.Context, *ListSomethingResponse, *gorm1.DB) error
 }
 
 // Delete ...
@@ -1036,19 +1066,55 @@ type IntPointServiceIntPointWithAfterDelete interface {
 
 // CustomMethod ...
 func (m *IntPointServiceDefaultServer) CustomMethod(ctx context.Context, in *google_protobuf2.Empty) (*google_protobuf2.Empty, error) {
-	return &google_protobuf2.Empty{}, nil
+	out := &google_protobuf2.Empty{}
+	return out, nil
 }
 
 // CreateSomething ...
 func (m *IntPointServiceDefaultServer) CreateSomething(ctx context.Context, in *Something) (*Something, error) {
-	return &Something{}, nil
+	out := &Something{}
+	return out, nil
 }
 
 type IntPointTxnDefaultServer struct {
 }
 
+func (m *IntPointTxnDefaultServer) spanCreate(ctx context.Context, in interface{}, methodName string) (*trace1.Span, error) {
+	_, span := trace1.StartSpan(ctx, fmt.Sprint("IntPointTxnDefaultServer.", methodName))
+	raw, err := json1.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	span.Annotate([]trace1.Attribute{trace1.StringAttribute("in", string(raw))}, "in parameter")
+	return span, nil
+}
+
+// spanError ...
+func (m *IntPointTxnDefaultServer) spanError(span *trace1.Span, err error) error {
+	span.SetStatus(trace1.Status{
+		Code:    trace1.StatusCodeUnknown,
+		Message: err.Error(),
+	})
+	return err
+}
+
+// spanResult ...
+func (m *IntPointTxnDefaultServer) spanResult(span *trace1.Span, out interface{}) error {
+	raw, err := json1.Marshal(out)
+	if err != nil {
+		return err
+	}
+	span.Annotate([]trace1.Attribute{trace1.StringAttribute("out", string(raw))}, "out parameter")
+	return nil
+}
+
 // Create ...
 func (m *IntPointTxnDefaultServer) Create(ctx context.Context, in *CreateIntPointRequest) (*CreateIntPointResponse, error) {
+	span, errSpanCreate := m.spanCreate(ctx, in, "Create")
+	if errSpanCreate != nil {
+		return nil, errSpanCreate
+	}
+	defer span.End()
 	txn, ok := gorm2.FromContext(ctx)
 	if !ok {
 		return nil, errors1.NoTransactionError
@@ -1060,23 +1126,27 @@ func (m *IntPointTxnDefaultServer) Create(ctx context.Context, in *CreateIntPoin
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithBeforeCreate); ok {
 		var err error
 		if db, err = custom.BeforeCreate(ctx, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
 	}
 	res, err := DefaultCreateIntPoint(ctx, in.GetPayload(), db)
 	if err != nil {
-		return nil, err
+		return nil, m.spanError(span, err)
 	}
 	out := &CreateIntPointResponse{Result: res}
 	err = gateway1.SetCreated(ctx, "")
 	if err != nil {
-		return nil, err
+		return nil, m.spanError(span, err)
 	}
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithAfterCreate); ok {
 		var err error
 		if err = custom.AfterCreate(ctx, out, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
+	}
+	errSpanResult := m.spanResult(span, out)
+	if errSpanResult != nil {
+		return nil, m.spanError(span, errSpanResult)
 	}
 	return out, nil
 }
@@ -1093,6 +1163,11 @@ type IntPointTxnIntPointWithAfterCreate interface {
 
 // Read ...
 func (m *IntPointTxnDefaultServer) Read(ctx context.Context, in *ReadIntPointRequest) (*ReadIntPointResponse, error) {
+	span, errSpanCreate := m.spanCreate(ctx, in, "Read")
+	if errSpanCreate != nil {
+		return nil, errSpanCreate
+	}
+	defer span.End()
 	txn, ok := gorm2.FromContext(ctx)
 	if !ok {
 		return nil, errors1.NoTransactionError
@@ -1104,19 +1179,23 @@ func (m *IntPointTxnDefaultServer) Read(ctx context.Context, in *ReadIntPointReq
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithBeforeRead); ok {
 		var err error
 		if db, err = custom.BeforeRead(ctx, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
 	}
 	res, err := DefaultReadIntPoint(ctx, &IntPoint{Id: in.GetId()}, db, in.Fields)
 	if err != nil {
-		return nil, err
+		return nil, m.spanError(span, err)
 	}
 	out := &ReadIntPointResponse{Result: res}
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithAfterRead); ok {
 		var err error
 		if err = custom.AfterRead(ctx, out, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
+	}
+	errSpanResult := m.spanResult(span, out)
+	if errSpanResult != nil {
+		return nil, m.spanError(span, errSpanResult)
 	}
 	return out, nil
 }
@@ -1133,6 +1212,11 @@ type IntPointTxnIntPointWithAfterRead interface {
 
 // Update ...
 func (m *IntPointTxnDefaultServer) Update(ctx context.Context, in *UpdateIntPointRequest) (*UpdateIntPointResponse, error) {
+	span, errSpanCreate := m.spanCreate(ctx, in, "Update")
+	if errSpanCreate != nil {
+		return nil, errSpanCreate
+	}
+	defer span.End()
 	var err error
 	var res *IntPoint
 	txn, ok := gorm2.FromContext(ctx)
@@ -1146,7 +1230,7 @@ func (m *IntPointTxnDefaultServer) Update(ctx context.Context, in *UpdateIntPoin
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithBeforeUpdate); ok {
 		var err error
 		if db, err = custom.BeforeUpdate(ctx, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
 	}
 	if in.GetGerogeriGegege() == nil {
@@ -1155,14 +1239,18 @@ func (m *IntPointTxnDefaultServer) Update(ctx context.Context, in *UpdateIntPoin
 		res, err = DefaultPatchIntPoint(ctx, in.GetPayload(), in.GetGerogeriGegege(), db)
 	}
 	if err != nil {
-		return nil, err
+		return nil, m.spanError(span, err)
 	}
 	out := &UpdateIntPointResponse{Result: res}
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithAfterUpdate); ok {
 		var err error
 		if err = custom.AfterUpdate(ctx, out, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
+	}
+	errSpanResult := m.spanResult(span, out)
+	if errSpanResult != nil {
+		return nil, m.spanError(span, errSpanResult)
 	}
 	return out, nil
 }
@@ -1179,6 +1267,11 @@ type IntPointTxnIntPointWithAfterUpdate interface {
 
 // List ...
 func (m *IntPointTxnDefaultServer) List(ctx context.Context, in *ListIntPointRequest) (*ListIntPointResponse, error) {
+	span, errSpanCreate := m.spanCreate(ctx, in, "List")
+	if errSpanCreate != nil {
+		return nil, errSpanCreate
+	}
+	defer span.End()
 	txn, ok := gorm2.FromContext(ctx)
 	if !ok {
 		return nil, errors1.NoTransactionError
@@ -1190,7 +1283,7 @@ func (m *IntPointTxnDefaultServer) List(ctx context.Context, in *ListIntPointReq
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithBeforeList); ok {
 		var err error
 		if db, err = custom.BeforeList(ctx, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
 	}
 	pagedRequest := false
@@ -1200,7 +1293,7 @@ func (m *IntPointTxnDefaultServer) List(ctx context.Context, in *ListIntPointReq
 	}
 	res, err := DefaultListIntPoint(ctx, db, in.Filter, in.OrderBy, in.Paging, in.Fields)
 	if err != nil {
-		return nil, err
+		return nil, m.spanError(span, err)
 	}
 	var resPaging *query1.PageInfo
 	if pagedRequest {
@@ -1217,8 +1310,12 @@ func (m *IntPointTxnDefaultServer) List(ctx context.Context, in *ListIntPointReq
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithAfterList); ok {
 		var err error
 		if err = custom.AfterList(ctx, out, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
+	}
+	errSpanResult := m.spanResult(span, out)
+	if errSpanResult != nil {
+		return nil, m.spanError(span, errSpanResult)
 	}
 	return out, nil
 }
@@ -1235,6 +1332,11 @@ type IntPointTxnIntPointWithAfterList interface {
 
 // Delete ...
 func (m *IntPointTxnDefaultServer) Delete(ctx context.Context, in *DeleteIntPointRequest) (*DeleteIntPointResponse, error) {
+	span, errSpanCreate := m.spanCreate(ctx, in, "Delete")
+	if errSpanCreate != nil {
+		return nil, errSpanCreate
+	}
+	defer span.End()
 	txn, ok := gorm2.FromContext(ctx)
 	if !ok {
 		return nil, errors1.NoTransactionError
@@ -1246,19 +1348,23 @@ func (m *IntPointTxnDefaultServer) Delete(ctx context.Context, in *DeleteIntPoin
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithBeforeDelete); ok {
 		var err error
 		if db, err = custom.BeforeDelete(ctx, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
 	}
 	err := DefaultDeleteIntPoint(ctx, &IntPoint{Id: in.GetId()}, db)
 	if err != nil {
-		return nil, err
+		return nil, m.spanError(span, err)
 	}
 	out := &DeleteIntPointResponse{}
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithAfterDelete); ok {
 		var err error
 		if err = custom.AfterDelete(ctx, out, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
+	}
+	errSpanResult := m.spanResult(span, out)
+	if errSpanResult != nil {
+		return nil, m.spanError(span, errSpanResult)
 	}
 	return out, nil
 }
@@ -1275,6 +1381,11 @@ type IntPointTxnIntPointWithAfterDelete interface {
 
 // DeleteSet ...
 func (m *IntPointTxnDefaultServer) DeleteSet(ctx context.Context, in *DeleteIntPointsRequest) (*DeleteIntPointResponse, error) {
+	span, errSpanCreate := m.spanCreate(ctx, in, "DeleteSet")
+	if errSpanCreate != nil {
+		return nil, errSpanCreate
+	}
+	defer span.End()
 	txn, ok := gorm2.FromContext(ctx)
 	if !ok {
 		return nil, errors1.NoTransactionError
@@ -1290,19 +1401,23 @@ func (m *IntPointTxnDefaultServer) DeleteSet(ctx context.Context, in *DeleteIntP
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithBeforeDeleteSet); ok {
 		var err error
 		if db, err = custom.BeforeDeleteSet(ctx, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
 	}
 	err := DefaultDeleteIntPointSet(ctx, objs, db)
 	if err != nil {
-		return nil, err
+		return nil, m.spanError(span, err)
 	}
 	out := &DeleteIntPointResponse{}
 	if custom, ok := interface{}(in).(IntPointTxnIntPointWithAfterDeleteSet); ok {
 		var err error
 		if err = custom.AfterDeleteSet(ctx, out, db); err != nil {
-			return nil, err
+			return nil, m.spanError(span, err)
 		}
+	}
+	errSpanResult := m.spanResult(span, out)
+	if errSpanResult != nil {
+		return nil, m.spanError(span, errSpanResult)
 	}
 	return out, nil
 }
@@ -1319,12 +1434,32 @@ type IntPointTxnIntPointWithAfterDeleteSet interface {
 
 // CustomMethod ...
 func (m *IntPointTxnDefaultServer) CustomMethod(ctx context.Context, in *google_protobuf2.Empty) (*google_protobuf2.Empty, error) {
-	return &google_protobuf2.Empty{}, nil
+	span, errSpanCreate := m.spanCreate(ctx, in, "CustomMethod")
+	if errSpanCreate != nil {
+		return nil, errSpanCreate
+	}
+	defer span.End()
+	out := &google_protobuf2.Empty{}
+	errSpanResult := m.spanResult(span, out)
+	if errSpanResult != nil {
+		return nil, m.spanError(span, errSpanResult)
+	}
+	return out, nil
 }
 
 // CreateSomething ...
 func (m *IntPointTxnDefaultServer) CreateSomething(ctx context.Context, in *Something) (*Something, error) {
-	return &Something{}, nil
+	span, errSpanCreate := m.spanCreate(ctx, in, "CreateSomething")
+	if errSpanCreate != nil {
+		return nil, errSpanCreate
+	}
+	defer span.End()
+	out := &Something{}
+	errSpanResult := m.spanResult(span, out)
+	if errSpanResult != nil {
+		return nil, m.spanError(span, errSpanResult)
+	}
+	return out, nil
 }
 
 type CircleServiceDefaultServer struct {
@@ -1362,4 +1497,463 @@ type CircleServiceCircleWithBeforeList interface {
 // CircleServiceCircleWithAfterList called before DefaultListCircle in the default List handler
 type CircleServiceCircleWithAfterList interface {
 	AfterList(context.Context, *ListCircleResponse, *gorm1.DB) error
+}
+type MultipleMethodsAutoGenDefaultServer struct {
+	DB *gorm1.DB
+}
+
+// CreateA ...
+func (m *MultipleMethodsAutoGenDefaultServer) CreateA(ctx context.Context, in *CreateIntPointRequest) (*CreateIntPointResponse, error) {
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeCreateA); ok {
+		var err error
+		if db, err = custom.BeforeCreateA(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	res, err := DefaultCreateIntPoint(ctx, in.GetPayload(), db)
+	if err != nil {
+		return nil, err
+	}
+	out := &CreateIntPointResponse{Result: res}
+	err = gateway1.SetCreated(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterCreateA); ok {
+		var err error
+		if err = custom.AfterCreateA(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeCreateA called before DefaultCreateAIntPoint in the default CreateA handler
+type MultipleMethodsAutoGenIntPointWithBeforeCreateA interface {
+	BeforeCreateA(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterCreateA called before DefaultCreateAIntPoint in the default CreateA handler
+type MultipleMethodsAutoGenIntPointWithAfterCreateA interface {
+	AfterCreateA(context.Context, *CreateIntPointResponse, *gorm1.DB) error
+}
+
+// CreateB ...
+func (m *MultipleMethodsAutoGenDefaultServer) CreateB(ctx context.Context, in *CreateIntPointRequest) (*CreateIntPointResponse, error) {
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeCreateB); ok {
+		var err error
+		if db, err = custom.BeforeCreateB(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	res, err := DefaultCreateIntPoint(ctx, in.GetPayload(), db)
+	if err != nil {
+		return nil, err
+	}
+	out := &CreateIntPointResponse{Result: res}
+	err = gateway1.SetCreated(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterCreateB); ok {
+		var err error
+		if err = custom.AfterCreateB(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeCreateB called before DefaultCreateBIntPoint in the default CreateB handler
+type MultipleMethodsAutoGenIntPointWithBeforeCreateB interface {
+	BeforeCreateB(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterCreateB called before DefaultCreateBIntPoint in the default CreateB handler
+type MultipleMethodsAutoGenIntPointWithAfterCreateB interface {
+	AfterCreateB(context.Context, *CreateIntPointResponse, *gorm1.DB) error
+}
+
+// ReadA ...
+func (m *MultipleMethodsAutoGenDefaultServer) ReadA(ctx context.Context, in *ReadIntPointRequest) (*ReadIntPointResponse, error) {
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeReadA); ok {
+		var err error
+		if db, err = custom.BeforeReadA(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	res, err := DefaultReadIntPoint(ctx, &IntPoint{Id: in.GetId()}, db, in.Fields)
+	if err != nil {
+		return nil, err
+	}
+	out := &ReadIntPointResponse{Result: res}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterReadA); ok {
+		var err error
+		if err = custom.AfterReadA(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeReadA called before DefaultReadAIntPoint in the default ReadA handler
+type MultipleMethodsAutoGenIntPointWithBeforeReadA interface {
+	BeforeReadA(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterReadA called before DefaultReadAIntPoint in the default ReadA handler
+type MultipleMethodsAutoGenIntPointWithAfterReadA interface {
+	AfterReadA(context.Context, *ReadIntPointResponse, *gorm1.DB) error
+}
+
+// ReadB ...
+func (m *MultipleMethodsAutoGenDefaultServer) ReadB(ctx context.Context, in *ReadIntPointRequest) (*ReadIntPointResponse, error) {
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeReadB); ok {
+		var err error
+		if db, err = custom.BeforeReadB(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	res, err := DefaultReadIntPoint(ctx, &IntPoint{Id: in.GetId()}, db, in.Fields)
+	if err != nil {
+		return nil, err
+	}
+	out := &ReadIntPointResponse{Result: res}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterReadB); ok {
+		var err error
+		if err = custom.AfterReadB(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeReadB called before DefaultReadBIntPoint in the default ReadB handler
+type MultipleMethodsAutoGenIntPointWithBeforeReadB interface {
+	BeforeReadB(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterReadB called before DefaultReadBIntPoint in the default ReadB handler
+type MultipleMethodsAutoGenIntPointWithAfterReadB interface {
+	AfterReadB(context.Context, *ReadIntPointResponse, *gorm1.DB) error
+}
+
+// UpdateA ...
+func (m *MultipleMethodsAutoGenDefaultServer) UpdateA(ctx context.Context, in *UpdateIntPointRequest) (*UpdateIntPointResponse, error) {
+	var err error
+	var res *IntPoint
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeUpdateA); ok {
+		var err error
+		if db, err = custom.BeforeUpdateA(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	if in.GetGerogeriGegege() == nil {
+		res, err = DefaultStrictUpdateIntPoint(ctx, in.GetPayload(), db)
+	} else {
+		res, err = DefaultPatchIntPoint(ctx, in.GetPayload(), in.GetGerogeriGegege(), db)
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := &UpdateIntPointResponse{Result: res}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterUpdateA); ok {
+		var err error
+		if err = custom.AfterUpdateA(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeUpdateA called before DefaultUpdateAIntPoint in the default UpdateA handler
+type MultipleMethodsAutoGenIntPointWithBeforeUpdateA interface {
+	BeforeUpdateA(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterUpdateA called before DefaultUpdateAIntPoint in the default UpdateA handler
+type MultipleMethodsAutoGenIntPointWithAfterUpdateA interface {
+	AfterUpdateA(context.Context, *UpdateIntPointResponse, *gorm1.DB) error
+}
+
+// UpdateB ...
+func (m *MultipleMethodsAutoGenDefaultServer) UpdateB(ctx context.Context, in *UpdateIntPointRequest) (*UpdateIntPointResponse, error) {
+	var err error
+	var res *IntPoint
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeUpdateB); ok {
+		var err error
+		if db, err = custom.BeforeUpdateB(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	if in.GetGerogeriGegege() == nil {
+		res, err = DefaultStrictUpdateIntPoint(ctx, in.GetPayload(), db)
+	} else {
+		res, err = DefaultPatchIntPoint(ctx, in.GetPayload(), in.GetGerogeriGegege(), db)
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := &UpdateIntPointResponse{Result: res}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterUpdateB); ok {
+		var err error
+		if err = custom.AfterUpdateB(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeUpdateB called before DefaultUpdateBIntPoint in the default UpdateB handler
+type MultipleMethodsAutoGenIntPointWithBeforeUpdateB interface {
+	BeforeUpdateB(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterUpdateB called before DefaultUpdateBIntPoint in the default UpdateB handler
+type MultipleMethodsAutoGenIntPointWithAfterUpdateB interface {
+	AfterUpdateB(context.Context, *UpdateIntPointResponse, *gorm1.DB) error
+}
+
+// ListA ...
+func (m *MultipleMethodsAutoGenDefaultServer) ListA(ctx context.Context, in *ListIntPointRequest) (*ListIntPointResponse, error) {
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeListA); ok {
+		var err error
+		if db, err = custom.BeforeListA(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	pagedRequest := false
+	if in.GetPaging().GetLimit() >= 1 {
+		in.Paging.Limit++
+		pagedRequest = true
+	}
+	res, err := DefaultListIntPoint(ctx, db, in.Filter, in.OrderBy, in.Paging, in.Fields)
+	if err != nil {
+		return nil, err
+	}
+	var resPaging *query1.PageInfo
+	if pagedRequest {
+		var offset int32
+		var size int32 = int32(len(res))
+		if size == in.GetPaging().GetLimit() {
+			size--
+			res = res[:size]
+			offset = in.GetPaging().GetOffset() + size
+		}
+		resPaging = &query1.PageInfo{Offset: offset}
+	}
+	out := &ListIntPointResponse{Results: res, PageInfo: resPaging}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterListA); ok {
+		var err error
+		if err = custom.AfterListA(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeListA called before DefaultListAIntPoint in the default ListA handler
+type MultipleMethodsAutoGenIntPointWithBeforeListA interface {
+	BeforeListA(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterListA called before DefaultListAIntPoint in the default ListA handler
+type MultipleMethodsAutoGenIntPointWithAfterListA interface {
+	AfterListA(context.Context, *ListIntPointResponse, *gorm1.DB) error
+}
+
+// ListB ...
+func (m *MultipleMethodsAutoGenDefaultServer) ListB(ctx context.Context, in *ListIntPointRequest) (*ListIntPointResponse, error) {
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeListB); ok {
+		var err error
+		if db, err = custom.BeforeListB(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	pagedRequest := false
+	if in.GetPaging().GetLimit() >= 1 {
+		in.Paging.Limit++
+		pagedRequest = true
+	}
+	res, err := DefaultListIntPoint(ctx, db, in.Filter, in.OrderBy, in.Paging, in.Fields)
+	if err != nil {
+		return nil, err
+	}
+	var resPaging *query1.PageInfo
+	if pagedRequest {
+		var offset int32
+		var size int32 = int32(len(res))
+		if size == in.GetPaging().GetLimit() {
+			size--
+			res = res[:size]
+			offset = in.GetPaging().GetOffset() + size
+		}
+		resPaging = &query1.PageInfo{Offset: offset}
+	}
+	out := &ListIntPointResponse{Results: res, PageInfo: resPaging}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterListB); ok {
+		var err error
+		if err = custom.AfterListB(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeListB called before DefaultListBIntPoint in the default ListB handler
+type MultipleMethodsAutoGenIntPointWithBeforeListB interface {
+	BeforeListB(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterListB called before DefaultListBIntPoint in the default ListB handler
+type MultipleMethodsAutoGenIntPointWithAfterListB interface {
+	AfterListB(context.Context, *ListIntPointResponse, *gorm1.DB) error
+}
+
+// DeleteA ...
+func (m *MultipleMethodsAutoGenDefaultServer) DeleteA(ctx context.Context, in *DeleteIntPointRequest) (*DeleteIntPointResponse, error) {
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeDeleteA); ok {
+		var err error
+		if db, err = custom.BeforeDeleteA(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	err := DefaultDeleteIntPoint(ctx, &IntPoint{Id: in.GetId()}, db)
+	if err != nil {
+		return nil, err
+	}
+	out := &DeleteIntPointResponse{}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterDeleteA); ok {
+		var err error
+		if err = custom.AfterDeleteA(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeDeleteA called before DefaultDeleteAIntPoint in the default DeleteA handler
+type MultipleMethodsAutoGenIntPointWithBeforeDeleteA interface {
+	BeforeDeleteA(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterDeleteA called before DefaultDeleteAIntPoint in the default DeleteA handler
+type MultipleMethodsAutoGenIntPointWithAfterDeleteA interface {
+	AfterDeleteA(context.Context, *DeleteIntPointResponse, *gorm1.DB) error
+}
+
+// DeleteB ...
+func (m *MultipleMethodsAutoGenDefaultServer) DeleteB(ctx context.Context, in *DeleteIntPointRequest) (*DeleteIntPointResponse, error) {
+	db := m.DB
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeDeleteB); ok {
+		var err error
+		if db, err = custom.BeforeDeleteB(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	err := DefaultDeleteIntPoint(ctx, &IntPoint{Id: in.GetId()}, db)
+	if err != nil {
+		return nil, err
+	}
+	out := &DeleteIntPointResponse{}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterDeleteB); ok {
+		var err error
+		if err = custom.AfterDeleteB(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeDeleteB called before DefaultDeleteBIntPoint in the default DeleteB handler
+type MultipleMethodsAutoGenIntPointWithBeforeDeleteB interface {
+	BeforeDeleteB(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterDeleteB called before DefaultDeleteBIntPoint in the default DeleteB handler
+type MultipleMethodsAutoGenIntPointWithAfterDeleteB interface {
+	AfterDeleteB(context.Context, *DeleteIntPointResponse, *gorm1.DB) error
+}
+
+// DeleteSetA ...
+func (m *MultipleMethodsAutoGenDefaultServer) DeleteSetA(ctx context.Context, in *DeleteIntPointsRequest) (*DeleteIntPointResponse, error) {
+	db := m.DB
+	objs := []*IntPoint{}
+	for _, id := range in.Ids {
+		objs = append(objs, &IntPoint{Id: id})
+	}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeDeleteSetA); ok {
+		var err error
+		if db, err = custom.BeforeDeleteSetA(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	err := DefaultDeleteIntPointSet(ctx, objs, db)
+	if err != nil {
+		return nil, err
+	}
+	out := &DeleteIntPointResponse{}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterDeleteSetA); ok {
+		var err error
+		if err = custom.AfterDeleteSetA(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeDeleteSetA called before DefaultDeleteSetAIntPoint in the default DeleteSetA handler
+type MultipleMethodsAutoGenIntPointWithBeforeDeleteSetA interface {
+	BeforeDeleteSetA(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterDeleteSetA called before DefaultDeleteSetAIntPoint in the default DeleteSetA handler
+type MultipleMethodsAutoGenIntPointWithAfterDeleteSetA interface {
+	AfterDeleteSetA(context.Context, *DeleteIntPointResponse, *gorm1.DB) error
+}
+
+// DeleteSetB ...
+func (m *MultipleMethodsAutoGenDefaultServer) DeleteSetB(ctx context.Context, in *DeleteIntPointsRequest) (*DeleteIntPointResponse, error) {
+	db := m.DB
+	objs := []*IntPoint{}
+	for _, id := range in.Ids {
+		objs = append(objs, &IntPoint{Id: id})
+	}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithBeforeDeleteSetB); ok {
+		var err error
+		if db, err = custom.BeforeDeleteSetB(ctx, db); err != nil {
+			return nil, err
+		}
+	}
+	err := DefaultDeleteIntPointSet(ctx, objs, db)
+	if err != nil {
+		return nil, err
+	}
+	out := &DeleteIntPointResponse{}
+	if custom, ok := interface{}(in).(MultipleMethodsAutoGenIntPointWithAfterDeleteSetB); ok {
+		var err error
+		if err = custom.AfterDeleteSetB(ctx, out, db); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// MultipleMethodsAutoGenIntPointWithBeforeDeleteSetB called before DefaultDeleteSetBIntPoint in the default DeleteSetB handler
+type MultipleMethodsAutoGenIntPointWithBeforeDeleteSetB interface {
+	BeforeDeleteSetB(context.Context, *gorm1.DB) (*gorm1.DB, error)
+}
+
+// MultipleMethodsAutoGenIntPointWithAfterDeleteSetB called before DefaultDeleteSetBIntPoint in the default DeleteSetB handler
+type MultipleMethodsAutoGenIntPointWithAfterDeleteSetB interface {
+	AfterDeleteSetB(context.Context, *DeleteIntPointResponse, *gorm1.DB) error
 }
